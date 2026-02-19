@@ -1,50 +1,29 @@
-// Servo Tester V2.0 Rotary Encoder Version Edited 20260218 
-// + Clockwise is Plus
-// + Mode Display A, b
-// + Show Speed with Circle
-
 #include <Servo.h>
 #include <TM1637Display.h>
 
-#define SW A1  // Rotary Encoder
+#define SW A1
 #define CLK A2
 #define DT A3
 
-TM1637Display display(7, 8);  //CLK, DIO
-
-bool beforeCLK;
-bool currentCLk;
-bool currentDT;
+TM1637Display display(7, 13);
+Servo s1;
 
 int angle = 90;
 
-int point1;
-int point2;
-
-unsigned int del = 50000;
-
-
-unsigned long long sec = 0;
-unsigned long long mic = 0;
-int vector = 1;
-
-Servo s1;
+int point1, point2;
+long delay_millis = 50000;
 
 void setup()
 {
   display.setBrightness(7);
-
-  Serial.begin(9600);
-
   s1.attach(9);
   s1.write(90);
 
   pinMode(CLK, INPUT_PULLUP);
   pinMode(DT, INPUT_PULLUP);
-  pinMode(SW, INPUT_PULLUP);
-  beforeCLK = digitalRead(CLK);
-  sec = millis();
-  byte data[] = { 0xF9, 0x5e, 0x54, 0x77 };
+
+
+  byte data[] = { 0xF9, 0x5e, 0x54, 0x77 };  // E.dnA
   display.setSegments(data);
 
   // Serial.begin(9600);
@@ -52,136 +31,150 @@ void setup()
 
 void loop()
 {
-  while (digitalRead(SW) == 1) {
-    uint8_t data[] = { 0xF7 };
-    if (rotary()) display.setSegments(data, 1, 0);
-    // Serial.print("1: ");
-    // Serial.println(angle);
-    s1.write(angle);
+  // 모드 A: 포인트 1 설정
+  while (digitalRead(SW) == HIGH) {
+    int8_t direction = getRotaryChange();
+    if (direction) {
+      changeAngle(direction);
+      updateDisplayWithMode(0xF7);  // 'A' 표시와 함께 각도 출력
+    }
   }
   point1 = angle;
-  while (digitalRead(SW) == 0) {
-    uint8_t data[] = { 0xFC };
-    display.setSegments(data, 1, 0);
-  }
+  while (digitalRead(SW) == LOW) {  // 바운싱 방지
+    updateDisplayWithMode(0xFC);
+    delay(10);
+  };
 
-  while (digitalRead(SW) == 1) {
-    rotary();
-    // Serial.print("2: ");
-    // Serial.println(angle);
-    s1.write(angle);
-  }
-  while (digitalRead(SW) == 0) {
-    uint8_t data[] = { 0xB8, 0x5C, 0x5C, 0x73 };
-    display.setSegments(data);
+  // 모드 b: 포인트 2 설정
+  while (digitalRead(SW) == HIGH) {
+    int8_t direction = getRotaryChange();
+    if (direction) {
+      changeAngle(direction);
+      updateDisplayWithMode(0xFC);  // 'b' 표시와 함께 각도 출력
+    }
   }
   point2 = angle;
-  int gap = abs(point1 - point2);
+  while (digitalRead(SW) == LOW) {             // 바운싱 방지
+    byte data[] = { 0xB8, 0x5C, 0x5C, 0x73 };  // L o o P
+    display.setSegments(data);
+    delay(10);
+  }
 
-  display.showNumberDec(angle, false, 3, 1);
-  del = 50000;
-
+  // 모드 자동 왕복 (Loop)
+  delay_millis = 50000;
+  changeDelay(0);
+  
   while (true) {
-    for (int i = 0; i <= gap; i += 1) {
-      if (digitalRead(SW) == 0) {
-        goto OUT;
-      }
-      angle = map(i, 0, gap, point2, point1);
-      // Serial.print("3: ");
-      // Serial.println(angle);
-      s1.write(angle);
-      display.showNumberDec(angle, false, 3, 1);
-      mic = micros();
-      while (micros() - mic < del) {
-        rotarySpeed();
-      }
-    }
-    delay(100);
-    for (int i = 0; i <= gap; i += 1) {
-      if (digitalRead(SW) == 0) {
-        goto OUT;
-      }
-      angle = map(i, 0, gap, point1, point2);
-      // Serial.print("4: ");
-      // Serial.println(angle);
-      s1.write(angle);
-      display.showNumberDec(angle, false, 3, 1);
-      mic = micros();
-      while (micros() - mic < del) {
-        rotarySpeed();
-      }
-    }
-    delay(100);
+    if (!moveServo(point2, point1)) break;
+    if (!moveServo(point1, point2)) break;
   }
-  OUT:
-  display.showNumberDec(angle, false, 3, 1);
-  while (digitalRead(SW) == 0) {
-    uint8_t data[] = { 0xF7 };
-    display.setSegments(data, 1, 0);
-  }
+
+  // OUT 처리
+  while (digitalRead(SW) == LOW) {  // 바운싱 방지
+    updateDisplayWithMode(0xF7);
+    delay(10);
+  };
 }
 
-bool rotary()
+// 서보 이동 및 속도 조절 함수
+bool moveServo(int start, int end)
 {
-  currentCLk = digitalRead(CLK);
-  currentDT = digitalRead(DT);
-  if (currentCLk != beforeCLK) {
-    beforeCLK = currentCLk;
-    int adder = 1;
-    if (millis() - sec < 70) {
-      vector++;
-    }
-    else {
-      vector = 1;
-    }
-    if (vector > 7) {
-      vector = 7;
-    }
-    if (currentCLk == currentDT) {  //시계
-      angle += vector;
-    }
-    else {
-      angle -= vector;  //반시계
-    }
-    if (angle <= 0) {
-      angle = 0;
-    }
-    if (angle >= 180) {
-      angle = 180;
-    }
-    sec = millis();
+  int gap = abs(start - end);
+  for (int i = 0; i <= gap; i++) {
+    if (digitalRead(SW) == LOW) return false;
+
+    angle = map(i, 0, gap, start, end);
+    s1.write(angle);
     display.showNumberDec(angle, false, 3, 1);
-    return true;
+
+    unsigned long startMicros = micros();
+    while (micros() - startMicros < delay_millis) {
+      int8_t direction = getRotaryChange();
+      if(direction) {
+        changeDelay(direction);
+      }
+    }
   }
-  return false;
+  delay(200);
+  return true;
 }
 
-void rotarySpeed()
-{
-  currentCLk = digitalRead(CLK);
-  currentDT = digitalRead(DT);
-  if (currentCLk != beforeCLK) {
-    beforeCLK = currentCLk;
-    if (currentCLk == currentDT) {  //시계
-      del -= 1000;
-    }
-    else {
-      del += 1000;  //반시계
-    }
-    if (del < 1000) {
-      del = 1000;
-    }
-    else if (del > 50000) {
-      del = 50000;
-    }
+// 인코더 읽기
+int8_t getRotaryChange() {
+  static uint8_t prevState = 0; // 이전 2비트 상태 저장 (내부 정적 변수)
+  static int8_t reason = 0;     // 판단기준
+  uint8_t currState = (digitalRead(CLK) << 1) | digitalRead(DT);
+
+  // 상태가 변하지 않았으면 즉시 0 반환
+  if (currState == prevState) return 0;
+  int result = 0;
+
+  // 2. 상태 변화 테이블 (Gray Code 경로 분석)
+  // 시계 방향 (CW): 00->01, 01->11, 11->10, 10->00
+  if ((prevState == 0 && currState == 1) || (prevState == 1 && currState == 3) || 
+           (prevState == 3 && currState == 2) || (prevState == 2 && currState == 0)) {
+    reason += 1;
   }
-  int level = map(del, 49000, 1000, 1,6);
-  uint8_t data[1];
-  if(level == 1) data[0] = 0x88;
-  if(level == 2) data[0] = 0x8C;
-  if(level == 3) data[0] = 0x8E;
-  if(level == 4) data[0] = 0x8F;
-  if(level == 5) data[0] = 0xAF;
-  if(level == 6) data[0] = 0xBF;
+  // 반시계 방향 (CCW): 00->10, 10->11, 11->01, 01->00
+  else if ((prevState == 0 && currState == 2) || (prevState == 2 && currState == 3) || 
+      (prevState == 3 && currState == 1) || (prevState == 1 && currState == 0)) {
+    reason += -1;
+  }
+  if(currState == 3) {          //한 딸깍에서 
+    if(reason > 0 ) result = 1; //시계 방향이라 판단되면
+    if(reason < 0) result = -1; //반시계라 판단되면
+    reason = 0;
+  }
+  prevState = currState;
+  return result;
+}
+
+void changeAngle(int8_t direction) {
+  static unsigned long lastMoveTime = 0;
+  static uint8_t vector = 1;
+  unsigned long now = millis();
+  if (now - lastMoveTime < 60) {  // 빠르게 돌리면 가속
+    vector = min(vector + 1, 10);
+  }
+  else {
+    vector = 1;
+  }
+  lastMoveTime = now;
+
+  if (direction == 1) {  //시계
+    angle += vector;
+  }
+  else {  //시계
+    angle -= vector;
+  }
+  angle = constrain(angle, 0, 180);
+  s1.write(angle);
+}
+
+// 속도 조절 및 원형 게이지 표시
+void changeDelay(int8_t direction)
+{
+  if (direction == 1) {  // 시계
+    delay_millis -= 1000;
+  }
+  else {                 //반시계
+    delay_millis += 1000;  
+  }
+  delay_millis = constrain(delay_millis, 1000, 50000);
+  uint8_t segments[] = { 0x00 };
+  if (delay_millis >= 1000) segments[0] = 0xBF;
+  if (delay_millis >= 8000) segments[0] = 0xAF;
+  if (delay_millis >= 16000) segments[0] = 0x8F;
+  if (delay_millis >= 24000) segments[0] = 0x8E;
+  if (delay_millis >= 32000) segments[0] = 0x8C;
+  if (delay_millis >= 40000) segments[0] = 0x88;
+  display.setSegments(segments, 1, 0);
+}
+
+
+void updateDisplayWithMode(uint8_t modeSeg)
+{
+  display.showNumberDec(angle, false, 3, 1);
+  uint8_t data[] = { modeSeg };
   display.setSegments(data, 1, 0);
 }
