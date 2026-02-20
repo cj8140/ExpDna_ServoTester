@@ -7,7 +7,7 @@
 #define CLK A2
 #define DT A3
 
-TM1637Display display(7, 13);
+TM1637Display display(7, 13); //CLK, DIO ; Ver 261PCB = 7,8 ; 26.2.20 by Kyoji
 Servo s1;
 
 int angle = 90;
@@ -21,6 +21,7 @@ void setup()
   s1.attach(9);
   s1.write(90);
 
+  pinMode(SW, INPUT); // Ver 261PCB = INPUT_PULLUP ; 26.2.20 by Kyoji
   pinMode(CLK, INPUT_PULLUP);
   pinMode(DT, INPUT_PULLUP);
 
